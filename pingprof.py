@@ -32,7 +32,8 @@ def main():
     file = tk.StringVar()
     limited = tk.BooleanVar()
     observer_enabled = tk.BooleanVar(value=True)
-    margin = tk.StringVar(value="160")
+    margin = tk.StringVar(value="25")
+    calibration = tk.StringVar()
     status = tk.StringVar(value="お手本の操作記録を選んでください")
     stop = threading.Event()
     messages = queue.Queue()
@@ -61,8 +62,10 @@ def main():
     ttk.Checkbutton(panel,text="手動のマウス移動をお手本の左右範囲に制限する",variable=limited).pack(anchor="w",pady=(10,0))
     row = ttk.Frame(panel)
     row.pack(anchor="w")
-    ttk.Label(row,text="左右の許容量（マウスのカウント）").pack(side="left")
+    ttk.Label(row,text="左右の許容角度（度）").pack(side="left")
     ttk.Entry(row,textvariable=margin,width=8).pack(side="left")
+    ttk.Label(row,text="　1回転のカウント数（空欄でお手本から推定）").pack(side="left")
+    ttk.Entry(row,textvariable=calibration,width=8).pack(side="left")
     ttk.Label(panel,text="開始音までに対象を前面にし、開始位置と視線を合わせてください。F8で終了。").pack(anchor="w",pady=5)
     ttk.Label(panel,textvariable=status,wraplength=480).pack(anchor="w")
 
@@ -79,7 +82,7 @@ def main():
             notes = cues(take)
             if not notes:
                 raise ValueError("案内できる入力がありません")
-            limit = HorizontalLimit(take["events"],width) if width is not None else None
+            limit = HorizontalLimit.from_degrees(take,*width) if width is not None else None
             with tempfile.TemporaryDirectory() as tmp, ExitStack() as playback:
                 playback.callback(winsound.PlaySound,None,0)
                 wav = str(Path(tmp)/"guide.wav")
@@ -134,11 +137,11 @@ def main():
             stop.set()
             return
         try:
-            width = int(margin.get()) if limited.get() else None
-            if width is not None and width<=0:
+            width = (float(margin.get()),float(calibration.get()) if calibration.get().strip() else None) if limited.get() else None
+            if width is not None and not 0<width[0]<180:
                 raise ValueError
         except ValueError:
-            messagebox.showerror("左右の許容量","正の整数を入力してください")
+            messagebox.showerror("左右の許容角度","角度は0度より大きく180度未満、1回転のカウント数は数値で指定してください")
             return
         if not Path(file.get()).is_file():
             choose()

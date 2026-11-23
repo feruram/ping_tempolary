@@ -11,12 +11,41 @@ import json
 
 
 # Frequency and stereo pan. Different pitches also distinguish directions in mono.
-SOUNDS = {"前進":(440,0), "後退":(260,0), "左移動":(330,-1), "右移動":(550,1),
+SOUNDS = {"タスク":(640,0),"前進":(440,0), "後退":(260,0), "左移動":(330,-1), "右移動":(550,1),
           "左旋回":(740,-1), "右旋回":(990,1), "ジャンプ":(1320,0),
           "左クリック":(1550,-.5), "右クリック":(1800,.5)}
 KEYS = {17:"前進",31:"後退",30:"左移動",32:"右移動",57:"ジャンプ"}
 RATE = 12000
 STEP = .12
+
+
+def task_starts(take):
+    tags = take.get("epoch_tags", [])
+    excluded = sorted(t for t,tag in tags if tag=="exclude")
+    spans = list(take.get("workpoints", []))
+    if "blocks" in take:
+        spans.extend((b["start"],b["end"]) for b in take["blocks"] if b["kind"]=="task")
+    else:
+        held = set()
+        for t,kind,code,down in take["events"]:
+            if kind not in ("key","button") or kind=="key" and code in (17,30,31,32,42,54,57,328,331,333,336):
+                continue
+            token = kind,code
+            if down:
+                if not held:
+                    start = t
+                held.add(token)
+            elif token in held:
+                held.remove(token)
+                if not held and t-start<=8:
+                    spans.append((start,t))
+    spans = [(a,b) for a,b in spans if not any(a<=t<=b for t in excluded)]
+    spans.extend((t,t) for t,tag in tags if tag=="task")
+    end = -1
+    for a,b in sorted(spans):
+        if a>end:
+            yield a
+        end = max(end,b)
 
 
 def cues(take):
@@ -30,6 +59,8 @@ def cues(take):
             else:
                 held.discard(label)
             groups[int(t/STEP)].add((label,bool(down)))
+    for t in task_starts(take):
+        groups[int(t/STEP)].add(("タスク",True))
     turn = 0
     for t,kind,dx,_ in take["events"]:
         if kind == "move":

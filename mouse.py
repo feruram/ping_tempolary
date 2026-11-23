@@ -2,6 +2,8 @@ import ctypes as c
 from bisect import bisect_right
 from contextlib import contextmanager
 from pathlib import Path
+import math
+from statistics import median
 import sys
 import time
 
@@ -25,6 +27,41 @@ class HorizontalLimit:
         if not self.times:
             raise ValueError("マウス移動を含むお手本が必要です")
         self.actual = 0
+
+    @classmethod
+    def from_degrees(cls, take, angle, per_turn=None):
+        limit = cls(take["events"],1)
+        if not math.isfinite(angle) or not 0 < angle < 180:
+            raise ValueError("左右の許容角度は0度より大きく180度未満で指定してください")
+        if per_turn is None:
+            ratios = []
+            prev = None
+            for frame in (take.get("position") or {}).get("frames", []):
+                t,yaw = frame.get("t"),frame.get("yaw")
+                if not all(isinstance(v,(float,int)) and math.isfinite(v) for v in (t,yaw)):
+                    prev = None
+                    continue
+                x = limit.centers[bisect_right(limit.times,t)]
+                space = frame.get("space")
+                if prev and space == prev[3] and 0 <= t-prev[0]<.5:
+                    continue
+                if prev and space == prev[3] and .5 <= t-prev[0] <= 1:
+                    dy = (yaw-prev[1]+180)%360-180
+                    dx = x-prev[2]
+                    if 12<abs(dy)<140 and abs(dx)>20:
+                        ratios.append(dy/dx)
+                prev = (t,yaw,x,space)
+            scale = median(ratios) if ratios else 0
+            if (take.get("input_edited") or len(ratios)<4 or not scale or
+                    sum(abs(r-scale)<=abs(scale)*.2 for r in ratios)<.6*len(ratios)):
+                raise ValueError("感度を安定して推定できません。現在の感度で360度回すカウント数を入力してください")
+            per_turn = 360/abs(scale)
+        if not math.isfinite(per_turn) or per_turn<=0:
+            raise ValueError("1回転のカウント数には正の数を入力してください")
+        limit.margin = math.floor(angle*per_turn/360)
+        if not limit.margin:
+            raise ValueError("許容角度がマウスの1カウントより小さいため、角度を広げてください")
+        return limit
 
     def apply(self, elapsed, dx):
         center = self.centers[bisect_right(self.times,elapsed)]
